@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # MongoDB database
+  mongodb:
+    image: mongo:7.0
+    container_name: healthdesk-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpassword
+      MONGO_INITDB_DATABASE: healthdesk
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - healthdesk-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # FastAPI backend
+  api:
+    build:
+      context: ./Api-Service
+      dockerfile: Dockerfile
+    container_name: healthdesk-api
+    restart: unless-stopped
+    environment:
+      - MONGODB_URL=mongodb://admin:adminpassword@mongodb:27017/healthdesk?authSource=admin
+      - MONGODB_DB_NAME=healthdesk
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost
+      - PROJECT_NAME=HealthDesk API
+      - VERSION=0.1.0
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - healthdesk-network
+    volumes:
+      - ./Api-Service:/app
+      - /app/venv
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # React frontend
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: healthdesk-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - healthdesk-network
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+
+networks:
+  healthdesk-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
